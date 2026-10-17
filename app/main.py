@@ -4,7 +4,10 @@
 Day 1 目标（当前已完成）：/health 和 /chat 两个接口能跑通
 Day 1 待办：把 /chat/stream 的流式接口补完（找到下方的 TODO）
 """
+import json
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from openai import OpenAI
 
@@ -79,15 +82,59 @@ def chat(req: ChatRequest):
 @app.post("/chat/stream")
 def chat_stream(req: ChatRequest):
     """
-    Day 1 待办：实现流式响应。
+    流式响应：模型每生成一小段，就立刻推给前端，而不是等全部生成完。
 
-    参考思路：
-        1. 把 create(...) 的参数加上 stream=True
-        2. 用 FastAPI 的 StreamingResponse 包一个生成器
-        3. 生成器里遍历 chunk，取 chunk.choices[0].delta.content
-        4. 注意 delta.content 可能是 None，要判空
+    为什么需要它：
+        普通接口要等模型把整段话写完才返回，用户会盯着空白等好几秒。
+        流式是边生成边吐字，用户立刻看到第一个字，体感快很多。
+        这也是 ChatGPT 那种"一个字一个字冒出来"效果的实现方式。
 
-    验收：用 curl 或 /docs 调用后，文字是一段一段出现的，不是等全部生成完才显示。
+    传输格式用的是 SSE（Server-Sent Events）：
+        每条消息格式固定为  data: {json}\n\n
+        最后发一条 data: [DONE] 表示结束。
     """
-    # TODO: 用 StreamingResponse 实现
-    raise HTTPException(status_code=501, detail="流式接口尚未实现，见代码注释")
+    if not config.DEEPSEEK_API_KEY:
+        raise HTTPException(status_code=500, detail="未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
+
+    messages = [{"role": "system", "content": "你是一个专业的财务助手。"}]
+    messages.extend(req.history)
+    messages.append({"role": "user", "content": req.message})
+
+    # 生成器函数：用 yield 分段产出，而不是一次 return 全部
+    def event_generator():
+        try:
+            # stream=True 是关键，告诉模型"我要一段一段地收"
+            stream = client.chat.completions.create(
+                model=config.DEEPSEEK_MODEL,
+                messages=messages,
+                temperature=0.3,
+                stream=True,
+            )
+
+            for chunk in stream:
+                # 有些 chunk 不带 choices（比如最后的用量统计），跳过
+                if not chunk.choices:
+                    continue
+
+                # delta 就是"这一小段新增的文字"
+                content = chunk.choices[0].delta.content
+
+                # 第一段和最后一段的 content 常常是 None，要判空
+                if content:
+                    payload = json.dumps({"delta": content}, ensure_ascii=False)
+                    yield f"data: {payload}\n\n"
+
+            yield "data: [DONE]\n\n"
+
+        except Exception as e:
+            err = json.dumps({"error": str(e)}, ensure_ascii=False)
+            yield f"data: {err}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # 关掉代理缓冲，否则流式会被攒成一次性返回
+        },
+    )
