@@ -1,0 +1,38 @@
+# 密钥文件，绝对不能提交
+.env
+.env.local
+*.key
+
+# Python 虚拟环境
+.venv/
+venv/
+env/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# 向量库持久化目录
+chroma_db/
+*.sqlite3
+*.db
+
+# 大文件与模型
+data/*.pdf
+data/*.docx
+models/
+*.bin
+*.safetensors
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 日志
+*.log
+logs/
