@@ -13,9 +13,10 @@
 |---|---|
 | FastAPI 服务骨架 | 已完成 |
 | DeepSeek 对话接口 | 已完成 |
-| 流式响应 | 进行中 |
-| PDF 解析与分块 | 待开始 |
-| 向量检索 | 待开始 |
+| 流式响应（SSE） | 已完成 |
+| 接口测试脚本 | 已完成 |
+| PDF 解析与分块 | 已完成 |
+| 向量检索 | 已完成 |
 | 引用溯源与拒答 | 待开始 |
 | Tool Calling（查单据 / 算金额） | 待开始 |
 | 评估集（20 条） | 待开始 |
@@ -94,6 +95,27 @@ uvicorn app.main:app --reload
 }
 ```
 
+### `POST /chat/stream`
+
+流式对话接口，基于 SSE（Server-Sent Events）。模型边生成边推送，适合需要「打字机效果」的场景。
+
+```json
+// 请求
+{ "message": "介绍一下差旅报销流程" }
+```
+
+响应是 `text/event-stream`，每段格式为 `data: {json}` + 空行，以 `data: [DONE]` 结束：
+
+```
+data: {"delta": "差旅"}
+
+data: {"delta": "报销"}
+
+data: [DONE]
+```
+
+> 注意：这个接口在 Swagger 的 `/docs` 页面看不出流式效果（会等全部返回才显示），需用 `test_api.py` 或 curl 验证。
+
 ---
 
 ## 目录结构
@@ -102,9 +124,18 @@ uvicorn app.main:app --reload
 finance-rag-agent/
 ├── app/
 │   ├── config.py        # 配置读取
-│   └── main.py          # FastAPI 入口与接口
+│   ├── main.py          # FastAPI 入口与接口
+│   ├── loader.py        # PDF / 文本解析，保留页码
+│   ├── chunking.py      # 按章条分块，供向量化
+│   ├── embedding.py     # bge 中文向量模型封装
+│   ├── vectorstore.py   # Chroma 封装：入库 / 检索
+│   └── ingest.py        # 入库流水线：读取→分块→向量化→存储
 ├── data/                # 待处理的原始文档（PDF 不提交）
-├── eval/                # 评估集与报告
+├── eval/                # 评估集与报告（含失败案例分析）
+├── test_api.py          # 接口测试
+├── test_embedding.py    # 向量模型自检
+├── test_chunking.py     # 分块自检（打印每一块供人工判断）
+├── test_vectorstore.py  # 检索自检（Top-1 / Top-3 准确率）
 ├── .env.example         # 环境变量模板
 ├── .gitignore
 └── requirements.txt
@@ -112,10 +143,32 @@ finance-rag-agent/
 
 ---
 
+## 检索自检
+
+三个脚本按顺序跑，对应 RAG 的三道工序，每一步都要肉眼确认结果合理再往下走：
+
+```bash
+./.venv/Scripts/python.exe test_embedding.py     # 1. 模型能跑，语义相似度是否合理
+./.venv/Scripts/python.exe test_chunking.py      # 2. 每一块单独看，能不能看懂
+./.venv/Scripts/python.exe test_vectorstore.py   # 3. 一句话能不能搜到那一块
+```
+
+**当前基线**（`财务报销管理制度.pdf`，3 页 / 1874 字 / 20 块）：
+
+| 指标 | 结果 |
+|---|---|
+| Top-1 是正确块 | 4 / 5（80%） |
+| Top-3 含正确块 | 5 / 5（100%） |
+| 无关问题最高分 | 0.3362（阈值 0.35，可据此拒答） |
+
+唯一失败项是**数字类问题**：「花三万块钱要经过哪些人审批」搜不到审批权限表——embedding 不会把「三万」映射到「20,000 至 50,000」这个区间。这类结构化查询将在 Day 4 交给 `query_reimbursement` 工具精确查表，而不是靠向量猜。详见 [`eval/report.md`](eval/report.md)。
+
+---
+
 ## 后续计划
 
-- [ ] 补完流式接口
-- [ ] 文档解析 + 分块 + 向量入库
+- [x] 补完流式接口
+- [x] 文档解析 + 分块 + 向量入库
 - [ ] RAG 问答链路，带引用溯源与拒答
 - [ ] 三个工具的 Agent：`search_docs` / `query_reimbursement` / `calc_amount`
 - [ ] 20 条测试问题 + 失败案例分析

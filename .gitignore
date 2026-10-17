@@ -20,12 +20,15 @@ chroma_db/
 *.sqlite3
 *.db
 
-# 大文件与模型
+# 大文件与模型（真实业务文档不入库）
 data/*.pdf
 data/*.docx
 models/
 *.bin
 *.safetensors
+
+# 例外：自制的示例文档必须提交，否则 clone 下来跑不了 Demo
+!data/财务报销管理制度.pdf
 
 # 编辑器
 .vscode/
