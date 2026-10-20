@@ -20,7 +20,7 @@
 | 引用溯源与拒答 | 已完成 |
 | 文档上传入库 | 已完成 |
 | Tool Calling（查单据 / 算金额） | 已完成 |
-| 评估集（20 条） | 待开始 |
+| 评估集（20 条） | 已完成 |
 | Docker 化 | 待开始 |
 
 ---
@@ -347,7 +347,7 @@ finance-rag-agent/
 - [x] RAG 问答链路，带引用溯源与拒答
 - [x] 文档上传入库
 - [x] 多工具 Agent：`search_docs` / `query_reimbursement` / `query_approval` / `calc_amount`
-- [ ] 20 条测试问题 + 失败案例分析
+- [x] 20 条测试问题 + 失败案例分析
 - [ ] Docker Compose 一键启动
 
 ---
