@@ -283,3 +283,39 @@ def rag_stats():
         "chunk_size": config.CHUNK_SIZE,
         "data_dir": str(config.DATA_DIR),
     }
+
+
+# ============================================================
+# Day 4：带工具调用的 Agent
+# ============================================================
+
+
+class AgentRequest(BaseModel):
+    question: str = Field(..., description="用户问题", min_length=1)
+
+
+class AgentResponse(BaseModel):
+    answer: str
+    tool_calls: list[dict] = Field(description="本次调用过哪些工具，含工具名和参数")
+
+
+@app.post("/agent/ask", response_model=AgentResponse)
+def agent_ask(req: AgentRequest):
+    """
+    带工具调用的问答。
+
+    和 /rag/ask 的区别：
+        /rag/ask 只会检索文档。这个接口让模型在「查文档 / 查单据 / 算金额」之间
+        自己选工具，能回答的问题范围更广。
+    """
+    if not config.DEEPSEEK_API_KEY:
+        raise HTTPException(status_code=500, detail="未配置 DEEPSEEK_API_KEY，请检查 .env 文件")
+
+    try:
+        from app import agent
+
+        result = agent.chat_with_tools(req.question)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Agent 调用失败：{e}")
+
+    return AgentResponse(**result)

@@ -19,7 +19,7 @@
 | 向量检索 | 已完成 |
 | 引用溯源与拒答 | 已完成 |
 | 文档上传入库 | 已完成 |
-| Tool Calling（查单据 / 算金额） | 待开始 |
+| Tool Calling（查单据 / 算金额） | 已完成 |
 | 评估集（20 条） | 待开始 |
 | Docker 化 | 待开始 |
 
@@ -197,6 +197,47 @@ data: [DONE]
 
 ---
 
+## Agent 接口（Function Calling）
+
+`/rag/ask` 只会检索文档。但财务人员有一类问题它答不了——「单号 BX2026091 审到哪了」「三万块要谁批」这类需要**查单据、算金额**的问题。
+
+`/agent/ask` 让模型在四个工具之间**自己判断该用哪个**：
+
+| 工具 | 干什么 | 典型问题 |
+|---|---|---|
+| `search_docs` | 查制度文档 | 住宿标准是多少 |
+| `query_reimbursement` | 查报销单状态 | BX2026091 审到哪了 |
+| `query_approval` | 查金额审批权限 | 三万块要谁批 |
+| `calc_amount` | 安全计算金额 | 超标 20% 是多少 |
+
+### `POST /agent/ask`
+
+```json
+// 请求
+{ "question": "三万块钱要经过哪些人审批？" }
+
+// 响应
+{
+  "answer": "30,000 元属于 20,000 至 50,000 元区间，需要经过：部门负责人、财务负责人、分管副总。",
+  "tool_calls": [ { "tool": "query_approval", "args": { "amount": 30000 } } ]
+}
+```
+
+`tool_calls` 记录了模型调用过哪些工具、用了什么参数——这对调试和评估都有用。
+
+### 为什么要有工具，而不是全靠检索
+
+这是整个项目最重要的一个设计判断，直接来自一个真实的失败案例：
+
+- 问「花三万块钱要经过谁审批」，纯检索会失败——因为 embedding 只比语义相似，**不会做数值推理**，它没法把「三万」映射到「20,000 至 50,000」这个区间。
+- 靠 `top_k` 多取几块让模型碰运气，是「大概率对」，不是「确定对」。
+
+所以金额审批这类**强结构化数据**，抽成 `query_approval` 工具精确查表：**工具是「确定对」，检索是「大概率对」。财务场景，「大概率」不够。**
+
+`calc_amount` 另一个细节：用 AST 白名单解析，而不是 `eval()`，避免用户注入恶意代码。
+
+---
+
 ## 拒答阈值是算出来的，不是拍脑袋定的
 
 阈值定太高，资料里明明有答案也会被拒；定太低，没有依据的也硬答，那就是幻觉。
@@ -227,7 +268,9 @@ finance-rag-agent/
 │   ├── embedding.py     # bge 中文向量模型封装
 │   ├── vectorstore.py   # Chroma 封装：入库 / 检索
 │   ├── ingest.py        # 入库流水线：读取→分块→向量化→存储
-│   └── rag.py           # RAG 链路：组装上下文 / 提示词 / 拒答 / 溯源
+│   ├── rag.py           # RAG 链路：组装上下文 / 提示词 / 拒答 / 溯源
+│   ├── tools.py         # 工具集：查单据 / 查审批 / 安全计算
+│   └── agent.py         # Agent：Function Calling 主循环
 ├── data/                # 待处理的原始文档（真实业务 PDF 不提交）
 ├── eval/                # 评估集与报告（含失败案例分析）
 ├── calibrate_threshold.py  # 拒答阈值校准
@@ -236,6 +279,7 @@ finance-rag-agent/
 ├── test_chunking.py     # 分块自检（打印每一块供人工判断）
 ├── test_vectorstore.py  # 检索自检（Top-1 / Top-3 准确率）
 ├── test_rag.py          # 问答验收（答得出 / 标出处 / 答不了会拒）
+├── test_agent.py        # Agent 验收（四类问题，看模型是否选对工具）
 ├── .env.example         # 环境变量模板
 ├── .gitignore
 └── requirements.txt
@@ -253,6 +297,7 @@ finance-rag-agent/
 ./.venv/Scripts/python.exe test_vectorstore.py      # 3. 一句话能不能搜到那一块
 ./.venv/Scripts/python.exe calibrate_threshold.py   # 4. 用数据定拒答阈值（不花钱）
 ./.venv/Scripts/python.exe test_rag.py              # 5. 完整问答链路（会调用大模型）
+./.venv/Scripts/python.exe test_agent.py            # 6. Agent 工具调用（四类问题选工具）
 ```
 
 **检索基线**（`财务报销管理制度.pdf`，3 页 / 1874 字 / 20 块）：
@@ -282,6 +327,17 @@ finance-rag-agent/
 
 详见 [`eval/report.md`](eval/report.md)。
 
+**Agent 验收**（4 题）：
+
+| 问题 | 预期工具 | 结果 |
+|---|---|---|
+| 出差住酒店一晚最多能报多少钱 | search_docs | ✅ |
+| 报销单 BX2026091 审到哪一步了 | query_reimbursement | ✅ |
+| 三万块钱要经过哪些人审批 | query_approval | ✅ |
+| 报销 15800 元超标准 20% 是多少 | calc_amount | ✅ |
+
+四题全部选对工具，其中「三万块」一题从 Day 2 的检索失败，变成了工具精确查表命中。
+
 ---
 
 ## 后续计划
@@ -290,7 +346,7 @@ finance-rag-agent/
 - [x] 文档解析 + 分块 + 向量入库
 - [x] RAG 问答链路，带引用溯源与拒答
 - [x] 文档上传入库
-- [ ] 三个工具的 Agent：`search_docs` / `query_reimbursement` / `calc_amount`
+- [x] 多工具 Agent：`search_docs` / `query_reimbursement` / `query_approval` / `calc_amount`
 - [ ] 20 条测试问题 + 失败案例分析
 - [ ] Docker Compose 一键启动
 
