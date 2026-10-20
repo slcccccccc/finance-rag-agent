@@ -30,7 +30,7 @@
 - **Web 框架**：FastAPI + Uvicorn
 - **大模型**：DeepSeek（`deepseek-chat`，OpenAI SDK 兼容协议）
 - **Embedding**：`BAAI/bge-small-zh-v1.5`（本地运行，CPU 可跑）
-- **向量库**：Chroma（开发阶段）→ PostgreSQL + pgvector（生产形态）
+- **向量库**：Chroma + **PostgreSQL/pgvector**（单据数据，Docker 容器）
 - **文档解析**：PyMuPDF
 - **容器**：Docker + Docker Compose
 
@@ -203,12 +203,27 @@ data: [DONE]
 
 `/agent/ask` 让模型在四个工具之间**自己判断该用哪个**：
 
-| 工具 | 干什么 | 典型问题 |
-|---|---|---|
-| `search_docs` | 查制度文档 | 住宿标准是多少 |
-| `query_reimbursement` | 查报销单状态 | BX2026091 审到哪了 |
-| `query_approval` | 查金额审批权限 | 三万块要谁批 |
-| `calc_amount` | 安全计算金额 | 超标 20% 是多少 |
+| 工具 | 干什么 | 数据源 | 典型问题 |
+|---|---|---|---|
+| `search_docs` | 查制度文档 | Chroma 向量库 | 住宿标准是多少 |
+| `query_reimbursement` | 查报销单状态 | PostgreSQL（Docker 容器） | BX2026091 审到哪了 |
+| `query_approval` | 查金额审批权限 | 审批区间表 | 三万块要谁批 |
+| `calc_amount` | 安全计算金额 | AST 白名单求值 | 超标 20% 是多少 |
+
+### 运行数据库
+
+单据数据存在 Docker 里的 PostgreSQL（pgvector 镜像）中，连接串读自 `.env` 的 `DATABASE_URL`。
+
+```bash
+# 启动数据库容器（首次）
+docker run -d --name ragdb -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ragdb -p 5432:5432 pgvector/pgvector:pg16
+
+# 建表并灌入示例单据（跑一次即可，幂等）
+./.venv/Scripts/python.exe init_db.py
+```
+
+> 国内拉不动 Docker Hub 的话，走镜像源：
+> `docker pull docker.m.daocloud.io/pgvector/pgvector:pg16` 再 `docker tag` 改名。
 
 ### `POST /agent/ask`
 

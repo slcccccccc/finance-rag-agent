@@ -13,15 +13,26 @@
     query_approval       —— 查金额审批权限（本文件）
 """
 
-# ---------- 模拟单据数据 ----------
-# 真实项目里这应该查数据库（Day 5 接 PostgreSQL）。
-# 现在先用内存里的字典模拟，把"工具"的形态先立起来，数据源之后再换。
-_REIMBURSEMENTS = [
-    {"id": "BX2026091", "applicant": "张三", "amount": 3200.0, "status": "部门负责人审批中", "updated": "2026-10-18"},
-    {"id": "BX2026087", "applicant": "李四", "amount": 15800.0, "status": "财务复核中", "updated": "2026-10-17"},
-    {"id": "BX2026083", "applicant": "王五", "amount": 68000.0, "status": "总经理审批中", "updated": "2026-10-16"},
-    {"id": "BX2026079", "applicant": "赵六", "amount": 900.0, "status": "已完成付款", "updated": "2026-10-15"},
-]
+# ---------- 报销单数据（PostgreSQL） ----------
+# 真实数据存在 Docker 里的 PostgreSQL 中（见 init_db.py）。
+# 这里只负责"查"，不负责"存"——数据的生命周期归数据库管。
+
+import psycopg2
+
+from app.config import DATABASE_URL
+
+
+def _query_db(sql: str, params: tuple) -> list[dict]:
+    """执行一条查询，返回字典列表。每次开短连接（简单场景够用，高频再上连接池）。"""
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
 
 # 审批权限表（来自财务报销管理制度 第十二条）
 # 每档：金额下限(含) / 金额上限(不含) / 审批人
@@ -35,14 +46,17 @@ _APPROVAL_LEVELS = [
 
 def query_reimbursement(order_id: str) -> dict:
     """
-    按单号查报销单状态。
+    按单号查报销单状态（数据源：PostgreSQL）。
 
     参数 order_id：单据号，如 BX2026091。
     返回：单据信息，或"未找到"的提示。
     """
-    for r in _REIMBURSEMENTS:
-        if r["id"].upper() == order_id.upper():
-            return {"found": True, **r}
+    rows = _query_db(
+        "SELECT id, applicant, amount, status, updated FROM reimbursements WHERE UPPER(id) = UPPER(%s)",
+        (order_id,),
+    )
+    if rows:
+        return {"found": True, **rows[0]}
     return {"found": False, "order_id": order_id, "message": "没有找到该单号"}
 
 

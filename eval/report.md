@@ -240,3 +240,19 @@ Day 2 首次暴露的问题（「三万块」检索失败），到这里有了**
 > 3. 拒答题判"不该出现的东西没出现"，而不是抽象的"拒绝"二字。
 > 4. 全过（100%）先怀疑标准定松了，回头复核。
 > 5. 失败时要先分清：是"产品错"还是"评估错"，两者修法完全不同。
+
+---
+
+## 阶段五：数据迁 PostgreSQL（Day 5 后半）
+
+单据数据从 `tools.py` 的内存字典迁到 Docker 中的 PostgreSQL 16（pgvector 镜像）。
+
+- 建表脚本：`init_db.py`（幂等，可重复跑）
+- `query_reimbursement` 改为参数化 SQL 查询（`WHERE UPPER(id) = UPPER(%s)`，防大小写不一致 + 防注入）
+- 端到端验收：Agent 4/4 仍全部通过
+
+**踩到一个真实集成 bug**：PostgreSQL 的 `NUMERIC` 类型返回 `Decimal` 对象，`json.dumps` 不认，`_execute_tool` 直接炸。修复：`json.dumps(..., default=str)` 兜底。
+
+> 这是典型的"迁数据源才会暴露的 bug"——昨天内存字典里是 float，一切正常；换了数据源，序列化层立刻出问题。**集成测试的价值就在于跨层。**
+
+**Docker 环境记录**：Windows 10 家庭版 + WSL2（3.0.10）+ Docker Desktop 29.9.1；Docker Hub 直连不通，走 `docker.m.daocloud.io` 镜像源拉取。

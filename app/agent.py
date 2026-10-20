@@ -123,7 +123,11 @@ def get_client():
 
 
 def _execute_tool(name: str, args: dict) -> str:
-    """执行一个工具，把结果序列化成字符串塞回给模型。"""
+    """执行一个工具，把结果序列化成字符串塞回给模型。
+
+    default=str：数据库的 NUMERIC 会返回 Decimal 类型，json 不认识，
+    统一转成字符串兜底（Decimal("3200.00") -> "3200.00"）。
+    """
     fn = TOOL_DISPATCH.get(name)
     if fn is None:
         return json.dumps({"error": f"未知工具 {name}"}, ensure_ascii=False)
@@ -131,7 +135,7 @@ def _execute_tool(name: str, args: dict) -> str:
         result = fn(**args)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
-    return json.dumps(result, ensure_ascii=False)
+    return json.dumps(result, ensure_ascii=False, default=str)
 
 
 def chat_with_tools(question: str, max_rounds: int = 5) -> dict:
