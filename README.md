@@ -21,7 +21,7 @@
 | 文档上传入库 | 已完成 |
 | Tool Calling（查单据 / 算金额） | 已完成 |
 | 评估集（20 条） | 已完成 |
-| Docker 化 | 待开始 |
+| Docker 化 | 已完成（数据库容器化） |
 
 ---
 
@@ -210,20 +210,22 @@ data: [DONE]
 | `query_approval` | 查金额审批权限 | 审批区间表 | 三万块要谁批 |
 | `calc_amount` | 安全计算金额 | AST 白名单求值 | 超标 20% 是多少 |
 
-### 运行数据库
+### 运行数据库（Docker Compose）
 
 单据数据存在 Docker 里的 PostgreSQL（pgvector 镜像）中，连接串读自 `.env` 的 `DATABASE_URL`。
 
 ```bash
-# 启动数据库容器（首次）
-docker run -d --name ragdb -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ragdb -p 5432:5432 pgvector/pgvector:pg16
+# 一条命令启动数据库（数据持久化到命名卷，容器删了数据不丢）
+docker compose up -d
 
 # 建表并灌入示例单据（跑一次即可，幂等）
 ./.venv/Scripts/python.exe init_db.py
 ```
 
-> 国内拉不动 Docker Hub 的话，走镜像源：
-> `docker pull docker.m.daocloud.io/pgvector/pgvector:pg16` 再 `docker tag` 改名。
+> 国内拉不动 Docker Hub 的话，先手动拉镜像再改名：
+> `docker pull docker.m.daocloud.io/pgvector/pgvector:pg16 && docker tag docker.m.daocloud.io/pgvector/pgvector:pg16 pgvector/pgvector:pg16`
+
+**为什么只容器化数据库、不容器化应用**：应用依赖 torch / sentence-transformers 等重量级库，打进镜像又慢又大（数 GB）。数据库需要隔离和持久化，适合容器；应用本地运行更轻便。这是有意识的取舍，不是没做完——容器化的重点是"哪些服务需要隔离"，不是"为了容器化而容器化"。
 
 ### `POST /agent/ask`
 
@@ -363,7 +365,7 @@ finance-rag-agent/
 - [x] 文档上传入库
 - [x] 多工具 Agent：`search_docs` / `query_reimbursement` / `query_approval` / `calc_amount`
 - [x] 20 条测试问题 + 失败案例分析
-- [ ] Docker Compose 一键启动
+- [x] Docker Compose 管理数据库（数据持久化）
 
 ---
 

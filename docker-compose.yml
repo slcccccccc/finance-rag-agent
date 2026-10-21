@@ -1,0 +1,30 @@
+# 编排文件：用一条命令管理数据库服务
+#
+# 说明：应用（FastAPI + RAG）依赖 torch / sentence-transformers 等重量级库，
+# 本地运行更轻便，因此不容器化；数据库用 Docker 容器管理，数据持久化。
+#
+# 用法：
+#   docker compose up -d        # 启动数据库（后台）
+#   docker compose down         # 停止数据库
+#   docker compose down -v      # 停止并删除数据卷（慎用，会清空数据）
+#
+# 启动后，应用连数据库的地址是 localhost:5432（见 .env 的 DATABASE_URL）。
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ragdb
+    ports:
+      - "5432:5432"          # 映射到主机，应用在主机上通过 localhost 连它
+    volumes:
+      - pgdata:/var/lib/postgresql/data   # 数据落盘，容器删了数据不丢
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
